@@ -50,7 +50,8 @@ INVERTER_SENSOR_TYPES = {
 }
 
 STORAGE_SENSOR_TYPES = {
-    "state_of_charge": ("Current state of charge", "%", "storageCapacity", None),
+    "storage_attached":("Battery Present", "True/False", "isHaveStorage", None),
+    "state_of_charge": ("Current state of charge", "%", "storageCapacity", "Battery"),
 }
 
 SENSOR_TYPES = {**TOTAL_SENSOR_TYPES, **INVERTER_SENSOR_TYPES, **STORAGE_SENSOR_TYPES}
@@ -92,7 +93,10 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         entities.append(
             GrowattInverter(probe, f"{name} Total", sensor, f"{plant_id}-{sensor}")
         )
-
+    for sensor in STORAGE_SENSOR_TYPES:
+        entities.append(
+            GrowattInverter(probe, f"{name} Battery", sensor, f"{plant_id}-{sensor}")
+        )
     # Add sensors for each inverter in the specified plant.
     for inverter in inverters:
         probe = GrowattData(api, username, password, inverter["deviceSn"], False)
@@ -107,55 +111,6 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
             )
     add_entities(entities, True)
 
-class GrowatttBatSensor(Entity):
-    """Representation of a Growattt Sensor."""
-
-    def __init__(self, api, name, username, password):
-        """Initialize battery sensor."""
-        self.api = api
-        self._name = name
-        self.username = username
-        self.password = password
-        self._state = None
-        self._unit_of_measurement = '%'
-        self.totalPowerToday = '0'
-        self.status = namedtuple(
-            'status', [])
-
-    @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._name
-
-    @property
-    def icon(self):
-        """Return the state of the sensor."""
-        return 'mdi:car-battery'
-
-    @property
-    def state(self):
-        """Return the state of the sensor."""
-        return self._state
-    
-    @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement of this entity, if any."""
-        return self._unit_of_measurement
-    
-    @Throttle(SCAN_INTERVAL)
-    def update(self):
-        """Get the latest data from the Growat API and updates the state."""
-        try:
-            login_res = self.api.login(self.username, self.password)
-            user_id = login_res['userId']
-            plant_info = self.api.plant_list(user_id)
-            battery = plant_info['data'][0]['storageCapacity']
-            data = battery.replace('%', '')
-            self._state = data
-        except TypeError:
-            _LOGGER.error(
-                "Unable to fetch data from Growatt server. %s")
-       
 class GrowattInverter(Entity):
     """Representation of a Growatt Sensor."""
 
@@ -229,6 +184,11 @@ class GrowattData:
                     r"[^\d.,]", "", total_info["plantMoneyText"]
                 )
                 self.data = total_info
+            elif self._class = "Battery":
+                plant_info = self.api.plant_list(user_id)
+                state_of_charge = plant_info['data'][0]['storageCapacity']
+                data = battery.replace('%', '') #get rid of pesky percent symbol
+                self._state = data
             else:
                 inverter_info = self.api.inverter_detail(self.inverter_id)
                 self.data = inverter_info["data"]
