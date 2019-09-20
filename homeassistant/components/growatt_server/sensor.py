@@ -49,7 +49,11 @@ INVERTER_SENSOR_TYPES = {
     "inverter_current_reactive_wattage": ("Reactive wattage", "W", "pacr", "power"),
 }
 
-SENSOR_TYPES = {**TOTAL_SENSOR_TYPES, **INVERTER_SENSOR_TYPES}
+STORAGE_SENSOR_TYPES = {
+    "state_of_charge": ("Current state of charge", "%", "storageCapacity", None),
+}
+
+SENSOR_TYPES = {**TOTAL_SENSOR_TYPES, **INVERTER_SENSOR_TYPES, **STORAGE_SENSOR_TYPES}
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -101,10 +105,57 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
                     f"{inverter['deviceSn']}-{sensor}",
                 )
             )
-
     add_entities(entities, True)
 
+class GrowatttBatSensor(Entity):
+    """Representation of a Growattt Sensor."""
 
+    def __init__(self, api, name, username, password):
+        """Initialize battery sensor."""
+        self.api = api
+        self._name = name
+        self.username = username
+        self.password = password
+        self._state = None
+        self._unit_of_measurement = '%'
+        self.totalPowerToday = '0'
+        self.status = namedtuple(
+            'status', [])
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def icon(self):
+        """Return the state of the sensor."""
+        return 'mdi:car-battery'
+
+    @property
+    def state(self):
+        """Return the state of the sensor."""
+        return self._state
+    
+    @property
+    def unit_of_measurement(self):
+        """Return the unit of measurement of this entity, if any."""
+        return self._unit_of_measurement
+    
+    @Throttle(SCAN_INTERVAL)
+    def update(self):
+        """Get the latest data from the Growat API and updates the state."""
+        try:
+            login_res = self.api.login(self.username, self.password)
+            user_id = login_res['userId']
+            plant_info = self.api.plant_list(user_id)
+            battery = plant_info['data'][0]['storageCapacity']
+            data = battery.replace('%', '')
+            self._state = data
+        except TypeError:
+            _LOGGER.error(
+                "Unable to fetch data from Growatt server. %s")
+       
 class GrowattInverter(Entity):
     """Representation of a Growatt Sensor."""
 
