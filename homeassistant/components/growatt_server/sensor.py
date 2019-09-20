@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import datetime
+from collections import namedtuple
 
 import growattServer
 import voluptuous as vol
@@ -11,10 +12,10 @@ from homeassistant.util import Throttle
 from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import CONF_NAME, CONF_USERNAME, CONF_PASSWORD
+from homeassistant.const import CONF_NAME, CONF_USERNAME, CONF_PASSWORD, ATTR_TEMPERATURE, CONF_API_KEY, CONF_NAME, ATTR_DATE, ATTR_TIME, ATTR_VOLTAGE
 
 _LOGGER = logging.getLogger(__name__)
-
+ATTR_POWER_GENERATION = 'power_generation'
 CONF_PLANT_ID = "plant_id"
 DEFAULT_PLANT_ID = "0"
 DEFAULT_NAME = "Growatt"
@@ -49,12 +50,7 @@ INVERTER_SENSOR_TYPES = {
     "inverter_current_reactive_wattage": ("Reactive wattage", "W", "pacr", "power"),
 }
 
-STORAGE_SENSOR_TYPES = {
-    "storage_attached":("Battery Present", "True/False", "isHaveStorage", None),
-    "state_of_charge": ("Current state of charge", "%", "storageCapacity", "Battery"),
-}
-
-SENSOR_TYPES = {**TOTAL_SENSOR_TYPES, **INVERTER_SENSOR_TYPES, **STORAGE_SENSOR_TYPES}
+SENSOR_TYPES = {**TOTAL_SENSOR_TYPES, **INVERTER_SENSOR_TYPES}
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -72,8 +68,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     password = config[CONF_PASSWORD]
     plant_id = config[CONF_PLANT_ID]
     name = config[CONF_NAME]
-
     api = growattServer.GrowattApi()
+    
 
     # Log in to api and fetch first plant if no plant id is defined.
     login_response = api.login(username, password)
@@ -84,6 +80,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     if plant_id == DEFAULT_PLANT_ID:
         plant_info = api.plant_list(user_id)
         plant_id = plant_info["data"][0]["plantId"]
+    
+    add_entities([GrowatttSensor(api, 'Growatt_Battery', username, password)], True)
 
     # Get a list of inverters for specified plant to add sensors for.
     inverters = api.inverter_list(plant_id)
@@ -93,11 +91,8 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
         entities.append(
             GrowattInverter(probe, f"{name} Total", sensor, f"{plant_id}-{sensor}")
         )
-    for sensor in STORAGE_SENSOR_TYPES:
-        entities.append(
-            GrowattInverter(probe, f"{name} Battery", sensor, f"{plant_id}-{sensor}")
-        )
-    # Add sensors for each inverter in the specified plant.
+
+        # Add sensors for each inverter in the specified plant.
     for inverter in inverters:
         probe = GrowattData(api, username, password, inverter["deviceSn"], False)
         for sensor in INVERTER_SENSOR_TYPES:
@@ -184,11 +179,6 @@ class GrowattData:
                     r"[^\d.,]", "", total_info["plantMoneyText"]
                 )
                 self.data = total_info
-            elif self._class = "Battery":
-                plant_info = self.api.plant_list(user_id)
-                state_of_charge = plant_info['data'][0]['storageCapacity']
-                data = battery.replace('%', '') #get rid of pesky percent symbol
-                self._state = data
             else:
                 inverter_info = self.api.inverter_detail(self.inverter_id)
                 self.data = inverter_info["data"]
@@ -198,3 +188,52 @@ class GrowattData:
     def get_data(self, variable):
         """Get the data."""
         return self.data.get(variable)
+class GrowatttSensor(Entity):
+    """Representation of a Growattt Sensor."""
+
+    def __init__(self, api, name, u, p):
+        """Initialize a PVOutput sensor."""
+        self.api = api
+        self._name = name
+        self.username = u
+        self.password = p
+        self._state = None
+        self._unit_of_measurement = '%'
+        self.totalPowerToday = '0'
+        self.status = namedtuple(
+            'status', [ATTR_DATE, ATTR_TIME,
+                       ATTR_POWER_GENERATION,
+                       ATTR_TEMPERATURE, ATTR_VOLTAGE])
+
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        return self._name
+
+    @property
+    def icon(self):
+        """Return the state of the sensor."""
+        return 'mdi:car-battery'
+
+    @property
+    def state(self):
+        """Return the state of the sensor."""
+        return self._state
+    
+    @property
+    def unit_of_measurement(self):
+        """Return the unit of measurement of this entity, if any."""
+        return self._unit_of_measurement
+
+    def update(self):
+        """Get the latest data from the Growat API and updates the state."""
+        try:
+            login_res = self.api.login(self.username, self.password)
+            user_id = login_res['userId']
+            plant_info = self.api.plant_list(user_id)
+            battery = plant_info['data'][0]['storageCapacity']
+            data = battery.replace('%', '')
+            self._state = data
+        except TypeError:
+            _LOGGER.error(
+                "Unable to fetch data from Growatt server. %s")   
